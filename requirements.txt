@@ -1,0 +1,6 @@
+# Update as needed
+torch
+#tensorflow
+gymnasium
+gymnasium[box2d]
+tqdm
