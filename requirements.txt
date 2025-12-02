@@ -4,3 +4,4 @@ torch
 gymnasium
 gymnasium[box2d]
 tqdm
+tensorflow
