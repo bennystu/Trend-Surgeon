@@ -52,3 +52,24 @@ def generate_X_y_zeros_and_ones() -> Tuple[np.ndarray]:
     y = np.squeeze(y)
 
     return (X,y)
+
+def generate_time_series(n_samples, input_length, n_features, trend=True, noise_level=0.01):
+    """
+    Generates a dummy time series dataset with optional trend and noise
+    Returns X: (n_samples, input_length, n_features)
+            y: (n_samples, output_length)
+    """
+    import numpy as np
+    output_length = 1
+    X = np.zeros((n_samples, input_length, n_features))
+    y = np.zeros((n_samples, output_length))
+
+    for i in range(n_samples):
+        for f in range(n_features):
+            series = np.linspace(0, 1, input_length)
+            if noise_level > 0:
+                series += np.random.normal(0, noise_level, size=input_length)
+            X[i,:,f] = series
+        y[i,0] = X[i,-1,0] + np.random.normal(0, noise_level)
+
+    return X, y
