@@ -9,3 +9,5 @@ keras-tuner>=1.4.4
 
 #dataset
 kagglehub
+
+transformers==4.57.3
