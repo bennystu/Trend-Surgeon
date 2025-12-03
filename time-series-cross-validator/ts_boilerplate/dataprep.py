@@ -4,6 +4,7 @@ import numpy as np
 from ts_boilerplate.params import DATA
 from typing import Tuple, List
 import numpy as np
+import pandas as pd
 
 
 def load_data(data_path: str) -> np.ndarray:
@@ -142,3 +143,30 @@ def train_test_split(data: np.ndarray,
 
     return (data_train, data_test)
     # $CHALLENGIFY_END
+
+
+def extract_sentiments(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract sentiment + reasoning and prepare columns for model training.
+    """
+
+    # Extract sentiment + reasoning
+    df[['sentiment', 'sentiment_reasoning']] = df['insights'].apply(
+        lambda x: pd.Series({
+            'sentiment': x[0]['sentiment'],
+            'sentiment_reasoning': x[0]['sentiment_reasoning']
+        })
+    )
+
+    # Map sentiment strings → numeric labels
+    sentiment_map = {
+        "negative": 0,
+        "neutral": 1,
+        "positive": 2,
+    }
+    df["labels"] = df["sentiment"].map(sentiment_map)
+
+    # Keep only required columns
+    df = df[['description', 'labels', 'sentiment_reasoning', 'title']]
+
+    return df
