@@ -6,3 +6,6 @@ tqdm
 tensorflow
 
 keras-tuner>=1.4.4
+
+#dataset
+kagglehub
