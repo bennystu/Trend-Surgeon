@@ -12,3 +12,6 @@ kagglehub
 
 transformers==4.57.3
 xgboost
+yfinance
+hmmlearn
+holidays
