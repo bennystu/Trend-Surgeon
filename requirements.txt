@@ -1,17 +1,20 @@
-# Update as needed
+# ML frameworks (keep only the ones you actually need)
 torch
-#tensorflow
-gymnasium
-tqdm
 tensorflow
-
 keras-tuner>=1.4.4
 
-#dataset
+# Dataset & external tools
 kagglehub
-
-transformers==4.57.3
-xgboost
 yfinance
-hmmlearn
 holidays
+
+# Core ML stack
+scikit-learn
+xgboost
+transformers==4.57.3
+hmmlearn
+
+# Utilities
+tqdm
+gymnasium
+joblib
