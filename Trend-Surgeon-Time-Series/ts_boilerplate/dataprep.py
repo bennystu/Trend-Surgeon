@@ -8,6 +8,10 @@ import logging
 from tqdm.auto import tqdm
 from hmmlearn.hmm import GaussianHMM
 import holidays
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler
+from datetime import datetime
+import requests
 
 TARGET_TICKER = "PPH"
 SUPPORT_TICKERS = [
@@ -1232,15 +1236,161 @@ df_final = build_feature_dataset(
 # ============================================================
 
 
-#def get_X_y(
+def get_X_y(df, target_column='target_close'):
 
-
-#def get_folds(data: np.ndarray,
-
-
-
-#def train_test_split(data: np.ndarray,
+    y = df[target_column]
+    X = df.drop(columns=[target_column])
+    return X, y
 
 
 
-#def extract_sentiments(df: pd.DataFrame) -> pd.DataFrame:
+
+def train_test_split_ML(X: pd.DataFrame, y: pd.Series, n_splits=5):
+
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    splits = []
+
+    for train_idx, test_idx in tscv.split(X):
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+        splits.append((X_train, X_test, y_train, y_test))
+
+    return splits
+
+
+
+
+def train_test_split_RNN(X: pd.DataFrame, y: pd.DataFrame, seq_len: int, horizon: int, test_size: float = 0.2):
+    """
+    Splits and scales data for RNN, with log1p + StandardScaler for volume/volatility features
+    and StandardScaler for other numeric features. Creates sequences for RNN training.
+    """
+    # Features to drop
+    drop_features = [
+        'day_of_week', 'day_of_month', 'month', 'quarter',
+        'is_month_end', 'is_month_start', 'is_holiday_adjacent',
+        'is_opex_week', 'is_fomc_day', 'days_to_fomc', 'days_since_fomc',
+        'is_cpi_day', 'days_to_cpi', 'days_since_cpi',
+        'is_nfp_day', 'days_to_nfp', 'days_since_nfp',
+        'is_ppi_day', 'days_to_ppi', 'days_since_ppi',
+        'is_gdp_day', 'days_to_gdp', 'days_since_gdp'
+    ]
+
+    X = X.drop(columns=[f for f in drop_features if f in X.columns])
+
+    # Train-test split
+    train_size = int((1 - test_size) * len(X))
+    X_train, X_test = X.iloc[:train_size], X.iloc[train_size:]
+    y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
+
+    # Identify feature groups
+    volume_vol_features = [col for col in X_train.columns if 'Volume' in col or
+                           'Vol_' in col or 'Parkinson' in col or 'GK' in col or
+                           'BB_width' in col or 'OBV' in col or 'Entropy' in col]
+
+    numeric_features = [col for col in X_train.columns if col not in volume_vol_features]
+
+    # Initialize scalers
+    scaler_numeric = StandardScaler()
+    scaler_volume = StandardScaler()
+
+    # Scale numeric continuous features
+    X_train_numeric_scaled = scaler_numeric.fit_transform(X_train[numeric_features])
+    X_test_numeric_scaled = scaler_numeric.transform(X_test[numeric_features])
+
+    # Log1p + scale volume/volatility features
+    X_train_volume_scaled = scaler_volume.fit_transform(np.log1p(X_train[volume_vol_features]))
+    X_test_volume_scaled = scaler_volume.transform(np.log1p(X_test[volume_vol_features]))
+
+    # Combine scaled features
+    X_train_scaled = np.hstack([X_train_numeric_scaled, X_train_volume_scaled])
+    X_test_scaled = np.hstack([X_test_numeric_scaled, X_test_volume_scaled])
+
+    # Sequence creation
+    def create_sequences(X_scaled, y, seq_len, horizon):
+        X_seq, y_seq = [], []
+        for i in range(len(X_scaled) - seq_len - horizon + 1):
+            X_seq.append(X_scaled[i:i+seq_len])
+            y_seq.append(y.iloc[i+seq_len:i+seq_len+horizon].values)
+        return np.array(X_seq), np.array(y_seq)
+
+    X_train_seq, y_train_seq = create_sequences(X_train_scaled, y_train, seq_len, horizon)
+    X_test_seq, y_test_seq = create_sequences(X_test_scaled, y_test, seq_len, horizon)
+
+    return X_train_seq, X_test_seq, y_train_seq, y_test_seq, scaler_numeric, scaler_volume
+
+
+
+def fetch_massive_news_df(api_key: str, start_date: str, end_date: str = None, order: str = "desc") -> pd.DataFrame:
+    """
+    Fetch news from Massive API for a specific date range and return as a pandas DataFrame.
+
+    Args:
+        api_key (str): Your Massive API key.
+        start_date (str): Start date in 'YYYY-MM-DD' format.
+        end_date (str, optional): End date in 'YYYY-MM-DD' format. Defaults to today.
+        order (str, optional): 'asc' or 'desc' for sorting by published date. Default is 'desc'.
+
+    Returns:
+        pd.DataFrame: DataFrame with news articles.
+    """
+    url = "https://api.massive.com/v2/reference/news"
+
+    # Convert end_date to today if not provided
+    if end_date is None:
+        end_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+    # Convert to ISO format for the API
+    start_iso = datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_iso = datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    params = {
+        "order": order,
+        "sort": "published_utc",
+        "limit": 1000,  # Max per request
+        "start_date": start_iso,
+        "end_date": end_iso,
+        "apiKey": api_key
+    }
+
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        # Convert to DataFrame
+        if "results" in data:
+            df = pd.DataFrame(data["results"])
+            return df
+        else:
+            print("No results found in the API response.")
+            return pd.DataFrame()
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+        return pd.DataFrame()
+
+def extract_sentiments(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extracts sentiment and sentiment_reasoning from the 'insights' column,
+    and returns a DataFrame with only the relevant columns:
+    ['description', 'sentiment', 'sentiment_reasoning', 'title'].
+
+    Args:
+        df (pd.DataFrame): Original DataFrame with 'insights' column.
+
+    Returns:
+        pd.DataFrame: Processed DataFrame with extracted sentiment info.
+    """
+    # Extract 'sentiment' and 'sentiment_reasoning' from insights
+    df[['sentiment', 'sentiment_reasoning']] = df['insights'].apply(
+        lambda x: pd.Series({
+            'sentiment': x[0]['sentiment'],
+            'sentiment_reasoning': x[0]['sentiment_reasoning']
+        })
+    )
+
+    # Keep only the relevant columns
+    df = df[['description', 'sentiment', 'sentiment_reasoning', 'title']]
+
+    return df
