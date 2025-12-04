@@ -11,3 +11,4 @@ keras-tuner>=1.4.4
 kagglehub
 
 transformers==4.57.3
+xgboost
