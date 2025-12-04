@@ -1,18 +1,17 @@
 """Prepare Data so as to be used in a Pipelined ML model"""
 
 import numpy as np
-from ts_boilerplate.params import DATA
 from typing import Tuple, List
-import numpy as np
 import pandas as pd
 import yfinance as yf
 import logging
-
-
+from tqdm.auto import tqdm
+from hmmlearn.hmm import GaussianHMM
+import holidays
 
 TARGET_TICKER = "PPH"
 SUPPORT_TICKERS = [
-    "XPH", "IHE", "IBB", "XBI", "XLV", "VHT", "SPY", "VIXY"
+    "XPH"
 ]
 
 START_DATE = "2014-02-04"
@@ -239,13 +238,7 @@ def initialize_feature_registry(df, target, support_tickers):
 
 # ============================================================
 # STEP C — PER-TICKER TECHNICAL INDICATORS (FINAL VERSION)
-# ============================================================
-
-import numpy as np
-import pandas as pd
-from tqdm.auto import tqdm
-from hmmlearn.hmm import GaussianHMM
-
+# ===========================================================
 
 # ------------------------------------------------------------
 # OHLCV Helper
@@ -426,7 +419,6 @@ def feat_entropy(df, ticker):
 # ------------------------------------------------------------
 # HMM BLOCK (optional)
 # ------------------------------------------------------------
-from hmmlearn.hmm import GaussianHMM
 
 def feat_hmm(df, ticker, returns_dict, n_states=3):
     """
@@ -658,9 +650,6 @@ def compute_pca_features(df, tickers):
 # ============================================================
 # STEP F — CALENDAR + MACRO FEATURES (COMPRESSED, NO 'date')
 # ============================================================
-
-import pandas as pd
-import holidays
 
 # -----------------------------
 # FOMC Calendar Fetcher
@@ -1243,15 +1232,15 @@ df_final = build_feature_dataset(
 # ============================================================
 
 
-def get_X_y(
+#def get_X_y(
 
 
-def get_folds(data: np.ndarray,
-
-
-
-def train_test_split(data: np.ndarray,
+#def get_folds(data: np.ndarray,
 
 
 
-def extract_sentiments(df: pd.DataFrame) -> pd.DataFrame:
+#def train_test_split(data: np.ndarray,
+
+
+
+#def extract_sentiments(df: pd.DataFrame) -> pd.DataFrame:
