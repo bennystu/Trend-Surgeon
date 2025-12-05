@@ -16,25 +16,65 @@ def simple_load_data(ticker, start, end) -> pd.DataFrame:
 
 
 def simple_clean_stock(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Regularize calendar, forward-fill market gaps (weekends, holidays).
+    """
     full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq="D")
     df = df.reindex(full_range)
+
+    # OHLC only → forward then backward fill
     df = df.ffill().bfill()
+
+    return df
+
+def simple_flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    if isinstance(df.columns, pd.MultiIndex):
+        new_columns = []
+        for col in df.columns:
+            # remove empty parts and join
+            clean = [str(c) for c in col if str(c) != "" and c is not None]
+            new_columns.append("_".join(clean))
+        df.columns = new_columns
+    else:
+        df.columns = [str(c) for c in df.columns]
+
     return df
 
 
-def simple_add_features(df: pd.DataFrame, price_col: str) -> pd.DataFrame:
+def simple_add_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    df["simp_daily_ret"] = df[price_col].pct_change()
-    df["simp_ret_5d"] = df[price_col].pct_change(5)
-    df["simp_ma_10"] = df[price_col].rolling(10).mean()
-    df["simp_vol_10"] = df[price_col].rolling(10).std()
-    df["simp_price_over_ma10"] = df[price_col] / df["simp_ma_10"]
+    # tolerant OHLC detection
+    def find(colname):
+        matches = [c for c in df.columns if colname in c.lower()]
+        if not matches:
+            raise ValueError(
+                f"No column containing '{colname}' found. Columns: {df.columns.tolist()}"
+            )
+        return df[matches[0]].astype(float)
+
+    close = find("close")
+    open_ = find("open")
+    high  = find("high")
+    low   = find("low")
+
+    df["simp_ret_1d"] = close.pct_change()
+    df["simp_ret_5d"] = close.pct_change(5)
+    df["simp_ma_10"]  = close.rolling(10).mean()
+    df["simp_vol_10"] = close.rolling(10).std()
+    df["simp_price_over_ma10"] = close / df["simp_ma_10"]
+    df["simp_candle_body"] = close - open_
+    df["simp_range"] = high - low
 
     return df.dropna()
 
 
 def simple_add_target(df: pd.DataFrame, target_col: str, horizon: int):
+    """
+    Future value of Close(t + horizon)
+    """
     df = df.copy()
     df["simp_target_future"] = df[target_col].shift(-horizon)
     return df.dropna(subset=["simp_target_future"])
@@ -102,7 +142,7 @@ def simple_rnn_split(
 
 
 # ============================================================
-# FINAL SIMPLE DATASET BUILDER
+# FINAL SIMPLE DATASET BUILDER (OHLC compatible)
 # ============================================================
 
 def simple_prepare_dataset(
@@ -110,32 +150,58 @@ def simple_prepare_dataset(
     start: str,
     end: str,
     horizon: int,
-    for_rnn=False,
-    seq_len=20,
+    for_rnn: bool = False,
+    seq_len: int = 20,
 ):
+    """
+    Full simple dataprep pipeline for OHLC data:
+        - download
+        - flatten columns (MultiIndex → strings)
+        - clean calendar gaps
+        - add simple OHLC features
+        - add future target
+        - split train/test
+        - output X,y or RNN sequences
+    """
+    # 1. Download
     df = simple_load_data(ticker, start, end)
-    df = simple_clean_stock(df)
-    df = simple_add_features(df, "Close")
-    df = simple_add_target(df, "Close", horizon)
 
+    # 2. Fix yfinance MultiIndex columns
+    df = simple_flatten_columns(df)
+
+    # 3. Normalize calendar, fill missing trading days
+    df = simple_clean_stock(df)
+
+    # 4. Add basic OHLC features
+    df = simple_add_features(df)
+
+    # 5. Add future prediction target
+    close_col = [c for c in df.columns if "close" in c.lower()][0]
+    df = simple_add_target(df, target_col=close_col, horizon=horizon)
+
+    # 6. Split into train + test
     train_df, test_df = simple_split(df)
 
+    # ---------------------------
+    # XGBOOST FLOW
+    # ---------------------------
     if not for_rnn:
         simp_X_train, simp_y_train = simple_build_xy_xgb(train_df)
-        simp_X_test, simp_y_test = simple_build_xy_xgb(test_df)
+        simp_X_test,  simp_y_test  = simple_build_xy_xgb(test_df)
         return simp_X_train, simp_y_train, simp_X_test, simp_y_test
 
+    # ---------------------------
+    # RNN FLOW
+    # ---------------------------
     else:
         X_train, y_train = simple_get_xy(train_df)
-        X_test, y_test = simple_get_xy(test_df)
+        X_test,  y_test  = simple_get_xy(test_df)
 
-        X_train_s, X_test_s, scaler = (
-            StandardScaler().fit_transform(X_train),
-            StandardScaler().fit_transform(X_test),
-            StandardScaler(),
-        )
+        scaler = StandardScaler()
+        X_train_s = scaler.fit_transform(X_train)
+        X_test_s  = scaler.transform(X_test)
 
         X_train_seq, y_train_seq = simple_create_rnn_xy(X_train_s, seq_len, horizon)
-        X_test_seq, y_test_seq = simple_create_rnn_xy(X_test_s, seq_len, horizon)
+        X_test_seq,  y_test_seq  = simple_create_rnn_xy(X_test_s, seq_len, horizon)
 
         return X_train_seq, y_train_seq, X_test_seq, y_test_seq, scaler
